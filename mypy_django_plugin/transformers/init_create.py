@@ -23,11 +23,14 @@ def get_actual_types(
         actual_types.append((actual_name, actual_type))
     # kwargs
     if len(ctx.callee_arg_names) > 1:
-        for actual_name, actual_type in zip(ctx.arg_names[1], ctx.arg_types[1]):
-            if actual_name is None:
-                # unpacked dict as kwargs is not supported
-                continue
-            actual_types.append((actual_name, actual_type))
+        actual_types.extend(
+            (actual_name, actual_type)
+            for actual_name, actual_type in zip(
+                ctx.arg_names[1], ctx.arg_types[1]
+            )
+            if actual_name is not None
+        )
+
     return actual_types
 
 

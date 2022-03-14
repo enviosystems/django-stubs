@@ -113,7 +113,7 @@ class DjangoContext:
 
     def get_model_class_by_fullname(self, fullname: str) -> Optional[Type[Model]]:
         """Returns None if Model is abstract"""
-        annotated_prefix = WITH_ANNOTATIONS_FULLNAME + "["
+        annotated_prefix = f'{WITH_ANNOTATIONS_FULLNAME}['
         if fullname.startswith(annotated_prefix):
             # For our "annotated models", extract the original model fullname
             fullname = fullname[len(annotated_prefix) :].rstrip("]")
@@ -122,10 +122,14 @@ class DjangoContext:
                 fullname = fullname[: fullname.index(",")]
 
         module, _, model_cls_name = fullname.rpartition(".")
-        for model_cls in self.model_modules.get(module, set()):
-            if model_cls.__name__ == model_cls_name:
-                return model_cls
-        return None
+        return next(
+            (
+                model_cls
+                for model_cls in self.model_modules.get(module, set())
+                if model_cls.__name__ == model_cls_name
+            ),
+            None,
+        )
 
     def get_model_fields(self, model_cls: Type[Model]) -> Iterator[Field]:
         for field in model_cls._meta.get_fields():
@@ -157,9 +161,8 @@ class DjangoContext:
 
     def get_primary_key_field(self, model_cls: Type[Model]) -> Field:
         for field in model_cls._meta.get_fields():
-            if isinstance(field, Field):
-                if field.primary_key:
-                    return field
+            if isinstance(field, Field) and field.primary_key:
+                return field
         raise ValueError("No primary key defined")
 
     def get_expected_types(self, api: TypeChecker, model_cls: Type[Model], *, method: str) -> Dict[str, MypyType]:
@@ -240,8 +243,7 @@ class DjangoContext:
         return {helpers.get_class_fullname(cls) for cls in self.all_registered_model_classes}
 
     def get_attname(self, field: Field) -> str:
-        attname = field.attname
-        return attname
+        return field.attname
 
     def get_field_nullability(self, field: Union[Field, ForeignObjectRel], method: Optional[str]) -> bool:
         nullable = field.null
@@ -250,7 +252,7 @@ class DjangoContext:
         if method == "__init__":
             if (isinstance(field, Field) and field.primary_key) or isinstance(field, ForeignKey):
                 return True
-        if method == "create":
+        elif method == "create":
             if isinstance(field, AutoField):
                 return True
         if isinstance(field, Field) and field.has_default():
@@ -282,22 +284,21 @@ class DjangoContext:
             return AnyType(TypeOfAny.unannotated)
 
         is_nullable = self.get_field_nullability(field, method)
-        if isinstance(field, RelatedField):
-            related_model_cls = self.get_field_related_model_cls(field)
-            if related_model_cls is None:
-                return AnyType(TypeOfAny.from_error)
-
-            if method == "values":
-                primary_key_field = self.get_primary_key_field(related_model_cls)
-                return self.get_field_get_type(api, primary_key_field, method=method)
-
-            model_info = helpers.lookup_class_typeinfo(api, related_model_cls)
-            if model_info is None:
-                return AnyType(TypeOfAny.unannotated)
-
-            return Instance(model_info, [])
-        else:
+        if not isinstance(field, RelatedField):
             return helpers.get_private_descriptor_type(field_info, "_pyi_private_get_type", is_nullable=is_nullable)
+        related_model_cls = self.get_field_related_model_cls(field)
+        if related_model_cls is None:
+            return AnyType(TypeOfAny.from_error)
+
+        if method == "values":
+            primary_key_field = self.get_primary_key_field(related_model_cls)
+            return self.get_field_get_type(api, primary_key_field, method=method)
+
+        model_info = helpers.lookup_class_typeinfo(api, related_model_cls)
+        if model_info is None:
+            return AnyType(TypeOfAny.unannotated)
+
+        return Instance(model_info, [])
 
     def get_field_related_model_cls(self, field: Union[RelatedField, ForeignObjectRel]) -> Optional[Type[Model]]:
         if isinstance(field, RelatedField):
@@ -311,7 +312,7 @@ class DjangoContext:
                 related_model_cls = field.model
             elif "." not in related_model_cls:
                 # same file model
-                related_model_fullname = field.model.__module__ + "." + related_model_cls
+                related_model_fullname = f'{field.model.__module__}.{related_model_cls}'
                 related_model_cls = self.get_model_class_by_fullname(related_model_fullname)
             else:
                 related_model_cls = self.apps_registry.get_model(related_model_cls)
@@ -332,7 +333,7 @@ class DjangoContext:
             if isinstance(field, RelatedField):
                 currently_observed_model = field.related_model
                 model_name = currently_observed_model._meta.model_name
-                if model_name is not None and field_part == (model_name + "_id"):
+                if model_name is not None and field_part == f'{model_name}_id':
                     field = self.get_primary_key_field(currently_observed_model)
 
             if isinstance(field, ForeignObjectRel):

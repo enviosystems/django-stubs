@@ -37,10 +37,9 @@ def transform_model_class(ctx: ClassDefContext, django_context: DjangoContext) -
 
     if sym is not None and isinstance(sym.node, TypeInfo):
         helpers.get_django_metadata(sym.node)["model_bases"][ctx.cls.fullname] = 1
-    else:
-        if not ctx.api.final_iteration:
-            ctx.api.defer()
-            return
+    elif not ctx.api.final_iteration:
+        ctx.api.defer()
+        return
 
     process_model_class(ctx, django_context)
 
@@ -202,15 +201,18 @@ class NewSemanalDjangoPlugin(Plugin):
             return [self._new_dependency("mypy_extensions"), self._new_dependency("typing")]
 
         # for `get_user_model()`
-        if self.django_context.settings:
-            if file.fullname == "django.contrib.auth" or file.fullname in {"django.http", "django.http.request"}:
-                auth_user_model_name = self.django_context.settings.AUTH_USER_MODEL
-                try:
-                    auth_user_module = self.django_context.apps_registry.get_model(auth_user_model_name).__module__
-                except LookupError:
-                    # get_user_model() model app is not installed
-                    return []
-                return [self._new_dependency(auth_user_module)]
+        if self.django_context.settings and file.fullname in {
+            "django.contrib.auth",
+            "django.http",
+            "django.http.request",
+        }:
+            auth_user_model_name = self.django_context.settings.AUTH_USER_MODEL
+            try:
+                auth_user_module = self.django_context.apps_registry.get_model(auth_user_model_name).__module__
+            except LookupError:
+                # get_user_model() model app is not installed
+                return []
+            return [self._new_dependency(auth_user_module)]
 
         # ensure that all mentioned to='someapp.SomeModel' are loaded with corresponding related Fields
         defined_model_classes = self.django_context.model_modules.get(file.fullname)
@@ -248,8 +250,7 @@ class NewSemanalDjangoPlugin(Plugin):
         if fullname in manager_bases:
             return querysets.determine_proper_manager_type
 
-        info = self._get_typeinfo_or_none(fullname)
-        if info:
+        if info := self._get_typeinfo_or_none(fullname):
             if info.has_base(fullnames.FIELD_FULLNAME):
                 return partial(fields.transform_into_proper_return_type, django_context=self.django_context)
 
@@ -329,11 +330,11 @@ class NewSemanalDjangoPlugin(Plugin):
         return None
 
     def get_type_analyze_hook(self, fullname: str) -> Optional[Callable[[AnalyzeTypeContext], MypyType]]:
-        if fullname in (
+        if fullname in {
             "typing.Annotated",
             "typing_extensions.Annotated",
             "django_stubs_ext.annotations.WithAnnotations",
-        ):
+        }:
             return partial(handle_annotated_type, django_context=self.django_context)
 
     def get_dynamic_class_hook(self, fullname: str) -> Optional[Callable[[DynamicClassDefContext], None]]:

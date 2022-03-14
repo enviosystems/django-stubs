@@ -41,15 +41,14 @@ class ModelClassInitializer:
 
     def lookup_class_typeinfo_or_incomplete_defn_error(self, klass: type) -> TypeInfo:
         fullname = helpers.get_class_fullname(klass)
-        field_info = self.lookup_typeinfo_or_incomplete_defn_error(fullname)
-        return field_info
+        return self.lookup_typeinfo_or_incomplete_defn_error(fullname)
 
     def create_new_var(self, name: str, typ: MypyType) -> Var:
         # type=: type of the variable itself
         var = Var(name=name, type=typ)
         # var.info: type of the object variable is bound to
         var.info = self.model_classdef.info
-        var._fullname = self.model_classdef.info.fullname + "." + name
+        var._fullname = f'{self.model_classdef.info.fullname}.{name}'
         var.is_initialized_in_class = True
         var.is_inferred = True
         return var
@@ -59,8 +58,7 @@ class ModelClassInitializer:
 
     def add_new_class_for_current_module(self, name: str, bases: List[Instance]) -> TypeInfo:
         current_module = self.api.modules[self.model_classdef.info.module_name]
-        new_class_info = helpers.add_new_class_for_module(current_module, name=name, bases=bases)
-        return new_class_info
+        return helpers.add_new_class_for_module(current_module, name=name, bases=bases)
 
     def run(self) -> None:
         model_cls = self.django_context.get_model_class_by_fullname(self.model_classdef.fullname)
@@ -144,10 +142,10 @@ class AddRelatedModelsId(ModelClassInitializer):
 
 class AddManagers(ModelClassInitializer):
     def has_any_parametrized_manager_as_base(self, info: TypeInfo) -> bool:
-        for base in helpers.iter_bases(info):
-            if self.is_any_parametrized_manager(base):
-                return True
-        return False
+        return any(
+            self.is_any_parametrized_manager(base)
+            for base in helpers.iter_bases(info)
+        )
 
     def is_any_parametrized_manager(self, typ: Instance) -> bool:
         return typ.type.fullname in fullnames.MANAGER_CLASSES and isinstance(typ.args[0], AnyType)
@@ -185,7 +183,7 @@ class AddManagers(ModelClassInitializer):
             if isinstance(new_sym.node, Var):
                 new_var = Var(name, type=sym.type)
                 new_var.info = new_manager_info
-                new_var._fullname = new_manager_info.fullname + "." + name
+                new_var._fullname = f'{new_manager_info.fullname}.{name}'
                 new_sym.node = new_var
             new_manager_info.names[name] = new_sym
 
@@ -202,17 +200,16 @@ class AddManagers(ModelClassInitializer):
             except helpers.IncompleteDefnException as exc:
                 if not self.api.final_iteration:
                     raise exc
-                else:
-                    base_manager_fullname = helpers.get_class_fullname(manager.__class__.__bases__[0])
-                    generated_managers = self.get_generated_manager_mappings(base_manager_fullname)
-                    if manager_fullname not in generated_managers:
-                        # not a generated manager, continue with the loop
-                        continue
-                    real_manager_fullname = generated_managers[manager_fullname]
-                    manager_info = self.lookup_typeinfo(real_manager_fullname)
-                    if manager_info is None:
-                        continue
-                    manager_class_name = real_manager_fullname.rsplit(".", maxsplit=1)[1]
+                base_manager_fullname = helpers.get_class_fullname(manager.__class__.__bases__[0])
+                generated_managers = self.get_generated_manager_mappings(base_manager_fullname)
+                if manager_fullname not in generated_managers:
+                    # not a generated manager, continue with the loop
+                    continue
+                real_manager_fullname = generated_managers[manager_fullname]
+                manager_info = self.lookup_typeinfo(real_manager_fullname)
+                if manager_info is None:
+                    continue
+                manager_class_name = real_manager_fullname.rsplit(".", maxsplit=1)[1]
 
             if manager_name not in self.model_classdef.info.names:
                 manager_type = Instance(manager_info, [Instance(self.model_classdef.info, [])])
@@ -222,7 +219,7 @@ class AddManagers(ModelClassInitializer):
                 if not self.has_any_parametrized_manager_as_base(manager_info):
                     continue
 
-                custom_model_manager_name = manager.model.__name__ + "_" + manager_class_name
+                custom_model_manager_name = f'{manager.model.__name__}_{manager_class_name}'
                 try:
                     custom_manager_type = self.create_new_model_parametrized_manager(
                         custom_model_manager_name, base_manager_info=manager_info
@@ -295,7 +292,7 @@ class AddRelatedManagers(ModelClassInitializer):
                     self.add_new_node_to_model_class(attname, parametrized_related_manager_type)
                     continue
 
-                name = model_cls.__name__ + "_" + related_model_cls.__name__ + "_" + "RelatedManager"
+                name = f'{model_cls.__name__}_{related_model_cls.__name__}_RelatedManager'
                 bases = [parametrized_related_manager_type, default_manager_type]
                 new_related_manager_info = self.add_new_class_for_current_module(name, bases)
 
@@ -316,8 +313,7 @@ class AddRelatedManagers(ModelClassInitializer):
         generated_managers = self.get_generated_manager_mappings(base_manager_fullname)
         if manager_fullname in generated_managers:
             real_manager_fullname = generated_managers[manager_fullname]
-            manager_info = self.lookup_typeinfo(real_manager_fullname)
-            if manager_info:
+            if manager_info := self.lookup_typeinfo(real_manager_fullname):
                 return Instance(manager_info, [Instance(related_model_info, [])])
         return None
 
@@ -442,8 +438,9 @@ def get_or_create_annotated_type(
         type_name = f"WithAnnotations[{model_type.type.fullname}]"
 
     annotated_typeinfo = helpers.lookup_fully_qualified_typeinfo(
-        cast(TypeChecker, api), model_module_name + "." + type_name
+        cast(TypeChecker, api), f'{model_module_name}.{type_name}'
     )
+
     if annotated_typeinfo is None:
         model_module_file = api.modules[model_module_name]  # type: ignore
 
@@ -464,5 +461,4 @@ def get_or_create_annotated_type(
             annotated_typeinfo.is_protocol = True
             # Save for later to easily find which field types were annotated
             annotated_typeinfo.metadata["annotated_field_types"] = fields_dict.items
-    annotated_type = Instance(annotated_typeinfo, [])
-    return annotated_type
+    return Instance(annotated_typeinfo, [])

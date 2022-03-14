@@ -20,22 +20,23 @@ DJANGO_COMMIT_REFS: Dict[str, str] = {
 def get_unused_ignores(ignored_message_freq: Dict[str, Dict[Union[str, Pattern], int]]) -> List[str]:
     unused_ignores = []
     for root_key, patterns in IGNORED_ERRORS.items():
-        for pattern in patterns:
-            if ignored_message_freq[root_key][pattern] == 0 and pattern not in itertools.chain(
-                EXTERNAL_MODULES, MOCK_OBJECTS
-            ):
-                unused_ignores.append(f"{root_key}: {pattern}")
+        unused_ignores.extend(
+            f"{root_key}: {pattern}"
+            for pattern in patterns
+            if ignored_message_freq[root_key][pattern] == 0
+            and pattern not in itertools.chain(EXTERNAL_MODULES, MOCK_OBJECTS)
+        )
+
     return unused_ignores
 
 
 def is_pattern_fits(pattern: Union[Pattern, str], line: str):
-    if isinstance(pattern, Pattern):
-        if pattern.search(line):
-            return True
-    else:
-        if pattern in line:
-            return True
-    return False
+    return bool(
+        isinstance(pattern, Pattern)
+        and pattern.search(line)
+        or not isinstance(pattern, Pattern)
+        and pattern in line
+    )
 
 
 def is_ignored(line: str, test_folder_name: str, *, ignored_message_freqs: Dict[str, Dict[str, int]]) -> bool:
@@ -105,8 +106,7 @@ if __name__ == "__main__":
                 global_rc = 1
                 print(line)
 
-        unused_ignores = get_unused_ignores(ignored_message_freqs)
-        if unused_ignores:
+        if unused_ignores := get_unused_ignores(ignored_message_freqs):
             print("UNUSED IGNORES ------------------------------------------------")
             print("\n".join(unused_ignores))
 
