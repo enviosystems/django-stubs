@@ -19,12 +19,11 @@ def _get_current_field_from_assignment(ctx: FunctionContext, django_context: Dja
 
     field_name = None
     for stmt in outer_model_info.defn.defs.body:
-        if isinstance(stmt, AssignmentStmt):
-            if stmt.rvalue == ctx.context:
-                if not isinstance(stmt.lvalues[0], NameExpr):
-                    return None
-                field_name = stmt.lvalues[0].name
-                break
+        if isinstance(stmt, AssignmentStmt) and stmt.rvalue == ctx.context:
+            if not isinstance(stmt.lvalues[0], NameExpr):
+                return None
+            field_name = stmt.lvalues[0].name
+            break
     if field_name is None:
         return None
 
@@ -32,8 +31,7 @@ def _get_current_field_from_assignment(ctx: FunctionContext, django_context: Dja
     if model_cls is None:
         return None
 
-    current_field = model_cls._meta.get_field(field_name)
-    return current_field
+    return model_cls._meta.get_field(field_name)
 
 
 def reparametrize_related_field_type(related_field_type: Instance, set_type, get_type) -> Instance:
@@ -109,9 +107,8 @@ def get_field_descriptor_types(
 
 def set_descriptor_types_for_field_callback(ctx: FunctionContext, django_context: DjangoContext) -> MypyType:
     current_field = _get_current_field_from_assignment(ctx, django_context)
-    if current_field is not None:
-        if isinstance(current_field, AutoField):
-            return set_descriptor_types_for_field(ctx, is_set_nullable=True)
+    if current_field is not None and isinstance(current_field, AutoField):
+        return set_descriptor_types_for_field(ctx, is_set_nullable=True)
 
     return set_descriptor_types_for_field(ctx)
 
@@ -142,9 +139,10 @@ def determine_type_of_array_field(ctx: FunctionContext, django_context: DjangoCo
         return default_return_type
 
     base_type = base_field_arg_type.args[1]  # extract __get__ type
-    args = []
-    for default_arg in default_return_type.args:
-        args.append(helpers.convert_any_to_type(default_arg, base_type))
+    args = [
+        helpers.convert_any_to_type(default_arg, base_type)
+        for default_arg in default_return_type.args
+    ]
 
     return helpers.reparametrize_instance(default_return_type, args)
 

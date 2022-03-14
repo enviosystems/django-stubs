@@ -63,7 +63,10 @@ def create_new_manager_class_from_from_queryset_method(ctx: DynamicClassDefConte
         assert isinstance(expr, StrExpr)
         custom_manager_generated_name = expr.value
     else:
-        custom_manager_generated_name = base_manager_info.name + "From" + derived_queryset_info.name
+        custom_manager_generated_name = (
+            f'{base_manager_info.name}From{derived_queryset_info.name}'
+        )
+
 
     custom_manager_generated_fullname = ".".join(["django.db.models.manager", custom_manager_generated_name])
     if "from_queryset_managers" not in base_manager_info.metadata:
@@ -81,8 +84,10 @@ def create_new_manager_class_from_from_queryset_method(ctx: DynamicClassDefConte
     # we need to copy all methods in MRO before django.db.models.query.QuerySet
     for class_mro_info in derived_queryset_info.mro:
         if class_mro_info.fullname == fullnames.QUERYSET_CLASS_FULLNAME:
-            for name, sym in class_mro_info.names.items():
-                queryset_method_names.append(name)
+            queryset_method_names.extend(
+                name for name, sym in class_mro_info.names.items()
+            )
+
             break
         for name, sym in class_mro_info.names.items():
             if isinstance(sym.node, FuncDef):
@@ -99,8 +104,9 @@ def create_new_manager_class_from_from_queryset_method(ctx: DynamicClassDefConte
     manager_method_names = []
     for manager_mro_info in new_manager_info.mro:
         if manager_mro_info.fullname == fullnames.BASE_MANAGER_CLASS_FULLNAME:
-            for name, sym in manager_mro_info.names.items():
-                manager_method_names.append(name)
+            manager_method_names.extend(
+                name for name, sym in manager_mro_info.names.items()
+            )
 
     # Copy/alter all methods in common between BaseManager/QuerySet over to the new manager if their return type is
     # the QuerySet's self-type. Alter the return type to be the custom queryset, parameterized by the manager's model
@@ -130,15 +136,16 @@ def create_new_manager_class_from_from_queryset_method(ctx: DynamicClassDefConte
 
             # Skip any method that doesn't return _QS
             original_return_type = get_proper_type(original_return_type)
-            if isinstance(original_return_type, UnboundType):
-                if original_return_type.name != "_QS":
-                    continue
-            elif isinstance(original_return_type, TypeVarType):
-                if original_return_type.name != "_QS":
-                    continue
-            else:
+            if (
+                isinstance(original_return_type, UnboundType)
+                and original_return_type.name != "_QS"
+                or not isinstance(original_return_type, UnboundType)
+                and isinstance(original_return_type, TypeVarType)
+                and original_return_type.name != "_QS"
+                or not isinstance(original_return_type, UnboundType)
+                and not isinstance(original_return_type, TypeVarType)
+            ):
                 continue
-
             # Return the custom queryset parameterized by the manager's type vars
             return_type = Instance(derived_queryset_info, self_type.args)
 

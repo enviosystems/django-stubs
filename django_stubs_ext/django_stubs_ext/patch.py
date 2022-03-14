@@ -32,7 +32,7 @@ class MPGeneric(Generic[_T]):
 
     def __repr__(self) -> str:
         """Better representation in tests and debug."""
-        return "<MPGeneric: {}, versions={}>".format(self.cls, self.version or "all")
+        return f'<MPGeneric: {self.cls}, versions={self.version or "all"}>'
 
 
 # certain django classes need to be generic, but lack the __class_getitem__ dunder needed to

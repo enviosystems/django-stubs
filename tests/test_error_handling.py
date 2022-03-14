@@ -62,7 +62,7 @@ def test_misconfiguration_handling(capsys, config_file_contents, message_part):
         with pytest.raises(SystemExit, match="2"):
             extract_django_settings_module(config_file.name)
 
-    error_message = "usage: " + TEMPLATE.format(message_part)
+    error_message = f"usage: {TEMPLATE.format(message_part)}"
     assert error_message == capsys.readouterr().err
 
 
@@ -100,7 +100,7 @@ def test_toml_misconfiguration_handling(capsys, config_file_contents, message_pa
         with pytest.raises(SystemExit, match="2"):
             extract_django_settings_module(config_file.name)
 
-    error_message = "usage: " + TEMPLATE_TOML.format(message_part)
+    error_message = f"usage: {TEMPLATE_TOML.format(message_part)}"
     assert error_message == capsys.readouterr().err
 
 

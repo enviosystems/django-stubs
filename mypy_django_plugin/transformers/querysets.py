@@ -19,14 +19,20 @@ from mypy_django_plugin.transformers.models import get_or_create_annotated_type
 
 
 def _extract_model_type_from_queryset(queryset_type: Instance) -> Optional[Instance]:
-    for base_type in [queryset_type, *queryset_type.type.bases]:
-        if (
-            len(base_type.args)
-            and isinstance(base_type.args[0], Instance)
-            and base_type.args[0].type.has_base(fullnames.MODEL_CLASS_FULLNAME)
-        ):
-            return base_type.args[0]
-    return None
+    return next(
+        (
+            base_type.args[0]
+            for base_type in [queryset_type, *queryset_type.type.bases]
+            if (
+                len(base_type.args)
+                and isinstance(base_type.args[0], Instance)
+                and base_type.args[0].type.has_base(
+                    fullnames.MODEL_CLASS_FULLNAME
+                )
+            )
+        ),
+        None,
+    )
 
 
 def determine_proper_manager_type(ctx: FunctionContext) -> MypyType:
@@ -66,8 +72,9 @@ def get_field_type_from_lookup(
             return AnyType(TypeOfAny.from_error)
         lookup_field = django_context.get_primary_key_field(related_model_cls)
 
-    field_get_type = django_context.get_field_get_type(helpers.get_typechecker_api(ctx), lookup_field, method=method)
-    return field_get_type
+    return django_context.get_field_get_type(
+        helpers.get_typechecker_api(ctx), lookup_field, method=method
+    )
 
 
 def get_values_list_row_type(
@@ -84,36 +91,45 @@ def get_values_list_row_type(
         return AnyType(TypeOfAny.from_error)
 
     typechecker_api = helpers.get_typechecker_api(ctx)
-    if len(field_lookups) == 0:
-        if flat:
+    if flat:
+        if len(field_lookups) == 0:
             primary_key_field = django_context.get_primary_key_field(model_cls)
             lookup_type = get_field_type_from_lookup(
                 ctx, django_context, model_cls, lookup=primary_key_field.attname, method="values_list"
             )
             assert lookup_type is not None
             return lookup_type
-        elif named:
+    elif named:
+        if len(field_lookups) == 0:
             column_types: "OrderedDict[str, MypyType]" = OrderedDict()
             for field in django_context.get_model_fields(model_cls):
                 column_type = django_context.get_field_get_type(typechecker_api, field, method="values_list")
                 column_types[field.attname] = column_type
-            if is_annotated:
-                # Return a NamedTuple with a fallback so that it's possible to access any field
-                return helpers.make_oneoff_named_tuple(
+            return (
+                helpers.make_oneoff_named_tuple(
                     typechecker_api,
                     "Row",
                     column_types,
-                    extra_bases=[typechecker_api.named_generic_type(ANY_ATTR_ALLOWED_CLASS_FULLNAME, [])],
+                    extra_bases=[
+                        typechecker_api.named_generic_type(
+                            ANY_ATTR_ALLOWED_CLASS_FULLNAME, []
+                        )
+                    ],
                 )
-            else:
-                return helpers.make_oneoff_named_tuple(typechecker_api, "Row", column_types)
+                if is_annotated
+                else helpers.make_oneoff_named_tuple(
+                    typechecker_api, "Row", column_types
+                )
+            )
+
+    elif len(field_lookups) == 0:
+        if is_annotated:
+            return typechecker_api.named_generic_type("builtins.tuple", [AnyType(TypeOfAny.special_form)])
         else:
-            # flat=False, named=False, all fields
-            if is_annotated:
-                return typechecker_api.named_generic_type("builtins.tuple", [AnyType(TypeOfAny.special_form)])
-            field_lookups = []
-            for field in django_context.get_model_fields(model_cls):
-                field_lookups.append(field.attname)
+            field_lookups = [
+                field.attname
+                for field in django_context.get_model_fields(model_cls)
+            ]
 
     if len(field_lookups) > 1 and flat:
         typechecker_api.fail("'flat' is not valid when 'values_list' is called with more than one field", ctx.context)
@@ -133,13 +149,11 @@ def get_values_list_row_type(
 
     if flat:
         assert len(column_types) == 1
-        row_type = next(iter(column_types.values()))
+        return next(iter(column_types.values()))
     elif named:
-        row_type = helpers.make_oneoff_named_tuple(typechecker_api, "Row", column_types)
+        return helpers.make_oneoff_named_tuple(typechecker_api, "Row", column_types)
     else:
-        row_type = helpers.make_tuple(typechecker_api, list(column_types.values()))
-
-    return row_type
+        return helpers.make_tuple(typechecker_api, list(column_types.values()))
 
 
 def extract_proper_type_queryset_values_list(ctx: MethodContext, django_context: DjangoContext) -> MypyType:
@@ -213,8 +227,7 @@ def extract_proper_type_queryset_annotate(ctx: MethodContext, django_context: Dj
     api = ctx.api
 
     field_types = model_type.type.metadata.get("annotated_field_types")
-    kwargs = gather_kwargs(ctx)
-    if kwargs:
+    if kwargs := gather_kwargs(ctx):
         # For now, we don't try to resolve the output_field of the field would be, but use Any.
         added_field_types = {name: AnyType(TypeOfAny.implementation_artifact) for name, typ in kwargs.items()}
         if field_types is not None:
